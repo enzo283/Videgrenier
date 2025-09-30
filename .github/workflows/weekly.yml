@@ -25,6 +25,5 @@ jobs:
 
       - name: Run fetch script
         env:
-          # Vérifie le nom du secret dans ton repo : DISCORD_WEBHOOK ou DISCORD_WEBHOOK_URL
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python fetch_vitegreniers.py
