@@ -1,1 +1,27 @@
+name: Weekly ViteGreniers
 
+on:
+  schedule:
+    - cron: '0 8 * * 5'  # Tous les vendredis à 8h (UTC)
+  workflow_dispatch:      # Permet de lancer manuellement
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python fetch_vitegreniers.py
