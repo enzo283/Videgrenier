@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# fetch_vitegreniers.py
-# Usage: DISCORD_WEBHOOK via GitHub Actions secret
-
 import os, re, time, requests, datetime
 from bs4 import BeautifulSoup
 
