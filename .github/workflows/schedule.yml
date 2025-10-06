@@ -1,45 +1,37 @@
-name: weekly-scrape
+run-scraper:
+  runs-on: ubuntu-latest
+  env:
+    SOURCE_URL: ${{ secrets.SOURCE_URL }}
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
 
-on:
-  schedule:
-    - cron: '0 6 * * 1'   # chaque lundi à 06:00 UTC (ajuste si besoin)
-  workflow_dispatch:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-jobs:
-  run-scraper:
-    runs-on: ubuntu-latest
-    env:
-      SOURCE_URL: ${{ secrets.SOURCE_URL }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Debug: print env and list files
+      run: |
+        echo "=== ENV ==="
+        echo "SOURCE_URL='${SOURCE_URL}'"
+        echo "PWD: $(pwd)"
+        ls -la
+        ls -la bot || true
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests beautifulsoup4; fi
+    - name: Debug: curl index URL
+      run: |
+        echo "== curl --head =="
+        curl -I --fail --location --max-time 15 "${SOURCE_URL}" || echo "curl failed"
+        echo "== curl --show =="
+        curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,120p' || echo "curl show failed"
 
-      - name: List repo (debug)
-        run: |
-          echo "PWD: $(pwd)"
-          ls -la
-          ls -la bot || true
-
-      - name: Run scraper
-        run: |
-          python -u bot/main.py
-        # si tu veux limiter le timeout du job, décommente et ajuste:
-        # timeout-minutes: 10
-
-      - name: Upload logs on failure (optional)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraper-logs
-          path: |
-            ./logs || .  # adapte si ton script écrit des logs
+    - name: Run scraper (python -u)
+      run: |
+        echo "Running: python -u bot/main.py"
+        python -u bot/main.py
