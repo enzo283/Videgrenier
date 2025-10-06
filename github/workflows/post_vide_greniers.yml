@@ -1,16 +1,18 @@
-name: Post Vide-Greniers to Discord (weekly)
+name: Post Vide-Greniers to Discord
 
 on:
+  workflow_dispatch:
   schedule:
-    # Chaque vendredi à 08:00 heure UTC (change si tu veux timezone différente)
-    - cron: '0 8 * * FRI'
-  workflow_dispatch: {}  # permet trigger manuel
+    - cron: '0 8 * * FRI'   # vendredi 08:00 UTC, ajuste si besoin
+
+permissions:
+  contents: read
 
 jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -18,16 +20,22 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r bot/requirements.txt
+          if [ -f bot/requirements.txt ]; then pip install -r bot/requirements.txt; fi
 
-      - name: Run poster
+      - name: Run scraper/poster
         env:
-          SOURCE_URL: ${{ secrets.SOURCE_URL }}   # tu peux mettre SOURCE_URL comme Secret ou le garder en clair
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          MIN_EXPOSANTS: '80'
-          TIMEZONE: 'Europe/Paris'
+          SOURCE_URL: ${{ secrets.SOURCE_URL }}
         run: |
           python bot/main.py
