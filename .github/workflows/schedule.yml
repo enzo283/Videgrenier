@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-scraper:
+  debug-scrape:
     runs-on: ubuntu-latest
     env:
       SOURCE_URL: ${{ secrets.SOURCE_URL }}
@@ -14,32 +14,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Prepare debug log
+        run: |
+          mkdir -p /tmp/scrape-debug
+          LOG=/tmp/scrape-debug/scrape-debug.txt
+          echo "=== START $(date -u) ===" >"$LOG"
+          echo "WORKDIR: $(pwd)" >>"$LOG"
+          echo "LIST ROOT:" >>"$LOG"
+          ls -la >>"$LOG" 2>&1 || true
+          echo "" >>"$LOG"
+          echo "=== ENV VARS ===" >>"$LOG"
+          echo "SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
+          echo "" >>"$LOG"
+          echo "=== CURL HEAD ===" >>"$LOG"
+          curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG" 2>&1 || echo "curl HEAD failed" >>"$LOG"
+          echo "" >>"$LOG"
+          echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG"
+          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG" 2>&1 || echo "curl show failed" >>"$LOG"
+          echo "" >>"$LOG"
+          echo "=== CHECK bot/main.py ===" >>"$LOG"
+          if [ -f bot/main.py ]; then
+            echo "bot/main.py exists" >>"$LOG"
+            echo "---- head of bot/main.py ----" >>"$LOG"
+            sed -n '1,200p' bot/main.py >>"$LOG" 2>&1 || true
+            echo "---- end head ----" >>"$LOG"
+          else
+            echo "bot/main.py NOT FOUND" >>"$LOG"
+          fi
+          echo "" >>"$LOG"
+          echo "=== RUN SCRIPT (if exists) ===" >>"$LOG"
+          if [ -f bot/main.py ]; then
+            python -u bot/main.py >>"$LOG" 2>&1 || echo "python script exited with non-zero" >>"$LOG"
+          else
+            echo "skip: no bot/main.py" >>"$LOG"
+          fi
+          echo "" >>"$LOG"
+          echo "=== END $(date -u) ===" >>"$LOG"
+          echo "WROTE LOG TO $LOG"
+        shell: bash
+
+      - name: Upload debug log artifact
+        uses: actions/upload-artifact@v4
         with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
-
-      - name: Debug: print env and list files
-        run: |
-          echo "=== ENV ==="
-          echo "SOURCE_URL='${SOURCE_URL}'"
-          echo "PWD: $(pwd)"
-          ls -la
-          ls -la bot || true
-
-      - name: Debug: curl index URL
-        run: |
-          echo "== curl --head =="
-          curl -I --fail --location --max-time 15 "${SOURCE_URL}" || echo "curl failed"
-          echo "== curl --show =="
-          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,120p' || echo "curl show failed"
-
-      - name: Run scraper (python -u)
-        run: |
-          echo "Running: python -u bot/main.py"
-          python -u bot/main.py
+          name: scrape-debug
+          path: /tmp/scrape-debug/scrape-debug.txt
