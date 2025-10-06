@@ -1,103 +1,86 @@
 #!/usr/bin/env python3
 import os
 import sys
-import requests
-from bs4 import BeautifulSoup
 import json
-import textwrap
+import logging
+from datetime import datetime, timezone
+from scraper import select_scraper, normalize_items
+from notifier import DiscordNotifier
 
-def send_discord(webhook_url, title, content):
-    # Discord webhook simple embed (keeps message compact)
-    data = {
-        "embeds": [
-            {
-                "title": title,
-                "description": content,
-                "color": 5814783
-            }
-        ]
-    }
+LOGFILE = "/tmp/scrape-debug/full-run.json"
+
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
+
+def save_log(data):
     try:
-        r = requests.post(webhook_url, json=data, timeout=10)
-        r.raise_for_status()
-        return True, r.status_code
+        with open(LOGFILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"Wrote JSON debug to {LOGFILE}")
     except Exception as e:
-        return False, str(e)
-
-def extract_items(html):
-    soup = BeautifulSoup(html, "html.parser")
-    selectors = ["article", "li", ".event", ".annonce", ".listing", ".card", ".result", ".item"]
-    items = []
-    for sel in selectors:
-        for el in soup.select(sel):
-            text = el.get_text(separator=" ", strip=True)
-            # heuristique : doit contenir lieu/date ou au moins être assez long
-            if len(text) > 50 and any(word in text.lower() for word in ["brocante","vide","grenier","dimanche","samedi","h:","€","place","rdv"]):
-                items.append(text)
-        if items:
-            break
-    # fallback : any long text nodes
-    if not items:
-        for el in soup.find_all(["p","div"]):
-            t = el.get_text(separator=" ", strip=True)
-            if len(t) > 120:
-                items.append(t)
-            if len(items) >= 20:
-                break
-    # dedupe and limit
-    seen = set()
-    out = []
-    for t in items:
-        if t in seen: continue
-        seen.add(t)
-        out.append(t)
-        if len(out) >= 20: break
-    return out
+        logging.exception("Failed to write JSON log")
 
 def main():
-    url = os.getenv("SOURCE_URL")
-    if not url:
-        print("ERROR: SOURCE_URL not set", file=sys.stderr)
+    setup_logging()
+    src = os.getenv("SOURCE_URL")
+    if not src:
+        logging.error("SOURCE_URL not set")
         sys.exit(2)
-
-    print(f"Fetching: {url}")
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-    except Exception as e:
-        print(f"ERROR: request failed: {e}", file=sys.stderr)
-        sys.exit(3)
-
-    print(f"Status: {r.status_code}")
-    items = extract_items(r.text)
-    print(f"Found {len(items)} items")
-
-    if not items:
-        print("No items found; exiting without sending message.")
-        return
-
-    # prepare content: join first items trimmed
-    parts = []
-    for i, t in enumerate(items, 1):
-        t_short = textwrap.shorten(t, width=300, placeholder="…")
-        parts.append(f"**{i}.** {t_short}")
-    content = "\n\n".join(parts[:10])  # limit embed size
 
     webhook = os.getenv("DISCORD_WEBHOOK")
     if not webhook:
-        print("DISCORD_WEBHOOK not set; printing items to stdout instead.")
-        for i, t in enumerate(items, 1):
-            print(f"--- ITEM {i} ---")
-            print(t)
-            print()
+        logging.warning("DISCORD_WEBHOOK not set — will only print results to stdout")
+
+    logging.info(f"Starting scrape for {src}")
+    scraper = select_scraper(src)
+    try:
+        items = scraper.scrape(src)
+    except Exception:
+        logging.exception("Scraper failed")
+        items = []
+
+    logging.info(f"Raw items found: {len(items)}")
+    items = normalize_items(items)
+    logging.info(f"After normalize/dedupe/filter: {len(items)}")
+
+    # Save debug log
+    debug = {
+        "source": src,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "raw_count": len(items),
+        "items": items
+    }
+    save_log(debug)
+
+    notifier = DiscordNotifier(webhook) if webhook else None
+
+    if not items:
+        logging.info("No items to send.")
+        if notifier:
+            notifier.send_text(f"Scraper finished: 0 items from {src}")
         return
 
-    title = f"Scraper: {len(items)} item(s) from {url}"
-    ok, info = send_discord(webhook, title, content)
-    if ok:
-        print(f"Discord message sent (HTTP {info})")
-    else:
-        print(f"Failed to send Discord message: {info}", file=sys.stderr)
+    # Try to send compact embeds (batch if many items)
+    try:
+        if notifier:
+            sent = notifier.send_items_embeds(src, items)
+            if not sent:
+                # fallback: upload text file (full list) + short message
+                notifier.send_text(f"Scraper: {len(items)} items found from {src} — sending full list as attachment.")
+                notifier.send_file("/tmp/scrape-debug/full-run.json", "scrape-results.json")
+                logging.info("Sent fallback file to Discord")
+        else:
+            # print nicely to stdout
+            for i, it in enumerate(items, 1):
+                print(f"--- ITEM {i} ---")
+                print(json.dumps(it, ensure_ascii=False, indent=2))
+                print()
+    except Exception:
+        logging.exception("Notifier failed")
         sys.exit(4)
 
 if __name__ == "__main__":
