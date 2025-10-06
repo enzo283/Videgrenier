@@ -6,11 +6,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  debug-scrape:
+  scrape-and-notify:
     runs-on: ubuntu-latest
     env:
       SOURCE_URL: ${{ secrets.SOURCE_URL }}
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      PYTHONUNBUFFERED: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,18 +21,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run scraper and save output
+      - name: Run scraper (creates logs and artifacts)
         run: |
           mkdir -p /tmp/scrape-debug
           LOG=/tmp/scrape-debug/scrape-debug.txt
           echo "=== START $(date -u) ===" >"$LOG"
-          echo "SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
-          echo "DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG"
+          echo "ENV: SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
+          echo "ENV: DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG"
           echo "" >>"$LOG"
           echo "=== CURL HEAD ===" >>"$LOG"
           curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG" 2>&1 || echo "curl HEAD failed" >>"$LOG"
@@ -39,12 +40,8 @@ jobs:
           echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG"
           curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG" 2>&1 || echo "curl show failed" >>"$LOG"
           echo "" >>"$LOG"
-          echo "=== RUN bot/main.py ===" >>"$LOG"
-          if [ -f bot/main.py ]; then
-            python -u bot/main.py >>"$LOG" 2>&1 || echo "python script exited with non-zero" >>"$LOG"
-          else
-            echo "bot/main.py NOT FOUND" >>"$LOG"
-          fi
+          echo "=== RUN python bot/main.py ===" >>"$LOG"
+          python -u bot/main.py >>"$LOG" 2>&1 || echo "python script exited with non-zero" >>"$LOG"
           echo "" >>"$LOG"
           echo "=== END $(date -u) ===" >>"$LOG"
           echo "WROTE LOG TO $LOG"
