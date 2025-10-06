@@ -5,21 +5,15 @@ import re
 import requests
 from datetime import datetime
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 # Configuration
-DEPT_URLS = [
-    "https://vide-greniers.org/evenements/Loire-Atlantique"
-    # Ajoute d'autres pages départementales si besoin
-]
+INDEX_URL = "https://vide-greniers.org/evenements/"
 MIN_EXPOSANTS = int(os.getenv("MIN_EXPONENTS", "80"))
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "").strip()
 SEEN_FILE = "data/seen.json"
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; scraper/1.0)"}
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; scraper/1.0; +https://example.org)"
-}
-
-# Utilitaires
 def load_seen():
     try:
         os.makedirs(os.path.dirname(SEEN_FILE) or ".", exist_ok=True)
@@ -36,13 +30,7 @@ def post_discord_embed(title, description, fields):
     if not DISCORD_WEBHOOK:
         print("Discord webhook not set (DISCORD_WEBHOOK). Skipping send.")
         return False
-    embed = {
-        "title": title,
-        "description": description,
-        "fields": fields[:25],  # Discord limite à 25 fields par embed
-        "timestamp": datetime.utcnow().isoformat(),
-        "color": 0x2F3136
-    }
+    embed = {"title": title, "description": description, "fields": fields[:25], "timestamp": datetime.utcnow().isoformat(), "color": 0x2F3136}
     payload = {"embeds": [embed]}
     try:
         r = requests.post(DISCORD_WEBHOOK, json=payload, timeout=15)
@@ -56,89 +44,53 @@ def post_discord_embed(title, description, fields):
         print("Error sending to Discord:", e)
         return False
 
-def parse_int_from_text(text):
-    if not text:
-        return None
-    m = re.search(r"(\d{1,4})\s*(exposant|exposants|stand|stands)?", text, re.I)
-    if m:
-        try:
-            return int(m.group(1))
-        except:
-            return None
-    return None
-
 def extract_time_from_text(text):
     if not text:
         return None
-    # cherche formats HH:MM ou HhMM ou HHhMM
     m = re.search(r"(\d{1,2}[:hH]\d{2})", text)
     if m:
-        return m.group(1).replace("H", "h").replace(":", ":")
-    # cherche heure simple
+        t = m.group(1).replace("H", "h")
+        return t if ":" in t else t.replace("h", ":00")
     m2 = re.search(r"\b(\d{1,2})h\b", text, re.I)
     if m2:
         return f"{int(m2.group(1)):02d}:00"
     return None
 
-def parse_event_card(card):
-    # Renvoie dict ou None
+def parse_event_card(card, base_url):
     text = card.get_text(" ", strip=True)
-    href = None
     a = card.find("a", href=True)
+    href = None
     if a:
-        href = a["href"]
-        if href.startswith("/"):
-            href = "https://vide-greniers.org" + href
-
-    # Titre
-    title_el = card.find(["h2","h3","h4"])
-    title = title_el.get_text(strip=True) if title_el else (a.get_text(strip=True) if a else text[:60])
-
-    # Date - cherche <time> ou éléments contenant jour/mois
+        href = urljoin(base_url, a["href"])
+    title_el = card.find(["h2","h3","h4"]) or a
+    title = title_el.get_text(strip=True) if title_el else (text[:60] if text else "Événement")
     date = None
     time_el = card.find("time")
     if time_el and time_el.get("datetime"):
-        try:
-            date = datetime.fromisoformat(time_el["datetime"]).date().isoformat()
-        except:
-            date = time_el.get_text(strip=True)
-    if not date:
-        # heuristique : cherche dd/mm/yyyy ou dd month
-        m = re.search(r"(\d{1,2}[\/\-\s]\d{1,2}[\/\-\s]\d{2,4})", text)
+        date = time_el["datetime"]
+    else:
+        m = re.search(r"(\d{1,2}\s+[A-Za-zéûô]+(?:\s+\d{4})?|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})", text)
         if m:
             date = m.group(1)
-        else:
-            m2 = re.search(r"(\b(?:lun|mar|mer|jeu|ven|sam|dim)[a-z]*\b).*?(\d{1,2}\s+[A-Za-zéûô]+(?:\s+\d{4})?)", text, re.I)
-            if m2:
-                date = m2.group(2)
-
-    # Adresse
     addr = None
-    addr_sel = card.find(class_=re.compile(r"(adresse|lieu|location|localisation|ville)", re.I))
+    addr_sel = card.find(class_=re.compile(r"(adresse|lieu|ville|localisation|location)", re.I))
     if addr_sel:
         addr = addr_sel.get_text(" ", strip=True)
     else:
-        # tentative: trouver "Adresse :" ou "Lieu :"
-        m = re.search(r"(Adresse|Lieu|Place|Place de|Rue)\s*[:\-]\s*([^\n\r,]+(?:,[^\n\r]+)?)", text, re.I)
+        m = re.search(r"(Adresse|Lieu|Place|Rue)\s*[:\-]\s*([^\.|\n]{5,200})", text, re.I)
         if m:
             addr = m.group(2).strip()
 
-    # Nombre d'exposants
     exposants = None
-    # Cherche expressions comme "80 exposants" ou "80 stands"
     m = re.search(r"(\d{1,4})\s*(?:exposant|exposants|stand|stands)", text, re.I)
     if m:
-        exposants = int(m.group(1))
-    else:
-        # parfois indiqué "Nombre d'exposants : 120"
-        m2 = re.search(r"Nombre.*?[:]\s*(\d{1,4})", text, re.I)
-        if m2:
-            exposants = int(m2.group(1))
+        try:
+            exposants = int(m.group(1))
+        except:
+            exposants = None
 
-    # Heures
     heure_exposants = None
     heure_visiteurs = None
-    # cherche phrases contenant 'exposant' et 'visiteur' / 'visiteurs' / 'ouverture'
     m_e = re.search(r"(?:installation|arriv|exposant)[^\d\n]*?(\d{1,2}[:h]\d{2}|\d{1,2}h?)", text, re.I)
     if m_e:
         heure_exposants = extract_time_from_text(m_e.group(1))
@@ -146,20 +98,31 @@ def parse_event_card(card):
     if m_v:
         heure_visiteurs = extract_time_from_text(m_v.group(1))
 
-    # Id unique simple
     uid = href or (title + "|" + (date or "") + "|" + (addr or ""))
+    return {"id": uid, "title": title, "url": href, "date": date, "address": addr, "exposants": exposants, "heure_exposants": heure_exposants, "heure_visiteurs": heure_visiteurs, "raw": text}
 
-    return {
-        "id": uid,
-        "title": title,
-        "url": href,
-        "date": date,
-        "address": addr,
-        "exposants": exposants,
-        "heure_exposants": heure_exposants,
-        "heure_visiteurs": heure_visiteurs,
-        "raw": text
-    }
+def find_department_urls(index_url):
+    try:
+        r = requests.get(index_url, headers=HEADERS, timeout=15)
+    except Exception as e:
+        print("Index request failed:", e)
+        return []
+    if r.status_code != 200:
+        print("Index non-200:", r.status_code)
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    links = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # garde les liens contenant '/evenements/' et une partie après (ex: /evenements/Loire-Atlantique)
+        if "/evenements/" in href:
+            full = urljoin(index_url, href)
+            # évite les liens d'événements individuels (contiennent souvent '/evenement/' ou un slug plus long)
+            # on garde les slugs départementaux qui ressemblent à '/evenements/Name' (1 segment après)
+            path = full.split("/evenements/")[-1].strip("/")
+            if path and "/" not in path:
+                links.add(full)
+    return sorted(list(links))
 
 def scrape_url(url):
     print("Scraping", url)
@@ -172,35 +135,22 @@ def scrape_url(url):
         print("Non-200 status", r.status_code)
         return []
     soup = BeautifulSoup(r.text, "html.parser")
-
-    # Cherche éléments d'événements : cartes, list-items, articles
+    # candidates: cartes d'événements
+    selectors = [".evenement", ".event", ".card", ".article-evenement", "li.event", "article", ".result-item"]
     candidates = []
-    # sélecteurs usuels
-    selectors = [
-        ".evenement", ".event", ".card", ".article-evenement", "li.event", "article"
-    ]
     for sel in selectors:
         found = soup.select(sel)
         if found:
             candidates.extend(found)
-
-    # S'il n'y a rien, prend les li dans une liste
     if not candidates:
         candidates = soup.find_all("li")
-
-    # Parse chaque candidate et garde celles plausibles
     events = []
     for c in candidates:
-        ev = parse_event_card(c)
+        ev = parse_event_card(c, url)
         if not ev:
             continue
-        # Doit avoir date et exposants (ou au moins exposants >= MIN_EXPOSANTS)
         if ev["exposants"] is not None and ev["exposants"] >= MIN_EXPOSANTS:
             events.append(ev)
-        else:
-            # si exposants non présent, on skip (on filtre stricte)
-            continue
-    # déduplique par id
     unique = {e["id"]: e for e in events}
     return list(unique.values())
 
@@ -211,11 +161,10 @@ def group_by_date(events):
         grouped.setdefault(d, []).append(e)
     return grouped
 
-def build_discord_fields(grouped):
+def build_discord_fields(grouped, dept_name):
     fields = []
     for date in sorted(grouped.keys()):
         items = grouped[date]
-        # construit une valeur détaillée par département/événement — ici page départementale, on inclut titre + adresse + heures + lien
         lines = []
         for ev in items:
             parts = []
@@ -233,32 +182,49 @@ def build_discord_fields(grouped):
                 parts.append(f"[Détails]({ev['url']})")
             lines.append(" • ".join(parts))
         value = "\n".join(lines) if lines else "Aucun événement trouvé"
-        fields.append({"name": date, "value": value})
+        fields.append({"name": f"{dept_name} — {date}", "value": value})
     return fields
 
 def main():
     seen = load_seen()
+    dept_urls = find_department_urls(INDEX_URL)
+    if not dept_urls:
+        print("Aucune URL départementale trouvée — vérifie INDEX_URL")
+        return
+    print(f"Found {len(dept_urls)} departments to scrape")
     all_events = []
-    for url in DEPT_URLS:
+    for url in dept_urls:
+        # déduit nom département depuis l'URL
+        dept_name = url.rstrip("/").split("/")[-1].replace("-", " ")
         evs = scrape_url(url)
-        all_events.extend(evs)
+        if evs:
+            # ajoute champ dept pour groupement par département si besoin
+            for e in evs:
+                e["department"] = dept_name
+            all_events.extend(evs)
 
     if not all_events:
-        print("No events matching filter found.")
+        print("No events matching filter found across all departments.")
         return
 
-    # garde seulement nouveaux événements (ou envoie tout si seen vide)
     new = [e for e in all_events if e["id"] not in seen]
-
     if not new:
         print("No new events since last run.")
         return
 
-    grouped = group_by_date(new)
-    fields = build_discord_fields(grouped)
+    # group by department then date for Discord fields
+    by_dept = {}
+    for e in new:
+        dept = e.get("department", "Inconnu")
+        by_dept.setdefault(dept, []).append(e)
 
-    title = f"Vide‑greniers (exposants ≥ {MIN_EXPOSANTS}) — résumé"
-    description = f"Pages scrappées: {len(DEPT_URLS)}. Événements nouveaux: {len(new)}."
+    fields = []
+    for dept, items in sorted(by_dept.items()):
+        grouped = group_by_date(items)
+        fields.extend(build_discord_fields(grouped, dept))
+
+    title = f"Vide‑greniers (exposants ≥ {MIN_EXPOSANTS}) — nouveaux événements"
+    description = f"Départements scannés: {len(dept_urls)}. Événements nouveaux: {len(new)}."
 
     sent = post_discord_embed(title, description, fields)
     if sent:
