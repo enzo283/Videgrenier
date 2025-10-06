@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SOURCE_URL: ${{ secrets.SOURCE_URL }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +31,7 @@ jobs:
           LOG=/tmp/scrape-debug/scrape-debug.txt
           echo "=== START $(date -u) ===" >"$LOG"
           echo "SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
+          echo "DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG"
           echo "" >>"$LOG"
           echo "=== CURL HEAD ===" >>"$LOG"
           curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG" 2>&1 || echo "curl HEAD failed" >>"$LOG"
