@@ -14,16 +14,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare debug log
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run scraper and save output
         run: |
           mkdir -p /tmp/scrape-debug
           LOG=/tmp/scrape-debug/scrape-debug.txt
           echo "=== START $(date -u) ===" >"$LOG"
-          echo "WORKDIR: $(pwd)" >>"$LOG"
-          echo "LIST ROOT:" >>"$LOG"
-          ls -la >>"$LOG" 2>&1 || true
-          echo "" >>"$LOG"
-          echo "=== ENV VARS ===" >>"$LOG"
           echo "SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
           echo "" >>"$LOG"
           echo "=== CURL HEAD ===" >>"$LOG"
@@ -32,21 +37,11 @@ jobs:
           echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG"
           curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG" 2>&1 || echo "curl show failed" >>"$LOG"
           echo "" >>"$LOG"
-          echo "=== CHECK bot/main.py ===" >>"$LOG"
-          if [ -f bot/main.py ]; then
-            echo "bot/main.py exists" >>"$LOG"
-            echo "---- head of bot/main.py ----" >>"$LOG"
-            sed -n '1,200p' bot/main.py >>"$LOG" 2>&1 || true
-            echo "---- end head ----" >>"$LOG"
-          else
-            echo "bot/main.py NOT FOUND" >>"$LOG"
-          fi
-          echo "" >>"$LOG"
-          echo "=== RUN SCRIPT (if exists) ===" >>"$LOG"
+          echo "=== RUN bot/main.py ===" >>"$LOG"
           if [ -f bot/main.py ]; then
             python -u bot/main.py >>"$LOG" 2>&1 || echo "python script exited with non-zero" >>"$LOG"
           else
-            echo "skip: no bot/main.py" >>"$LOG"
+            echo "bot/main.py NOT FOUND" >>"$LOG"
           fi
           echo "" >>"$LOG"
           echo "=== END $(date -u) ===" >>"$LOG"
