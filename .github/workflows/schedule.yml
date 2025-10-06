@@ -1,23 +1,45 @@
 name: weekly-scrape
+
 on:
   schedule:
-    - cron: "0 8 * * FRI"  # chaque vendredi 08:00 UTC
-  workflow_dispatch: {}
+    - cron: '0 6 * * 1'   # chaque lundi à 06:00 UTC (ajuste si besoin)
+  workflow_dispatch:
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     env:
-      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       SOURCE_URL: ${{ secrets.SOURCE_URL }}
-      MIN_EXPONENTS: 80
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
-      - name: Install deps
-        run: pip install requests beautifulsoup4
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests beautifulsoup4; fi
+
+      - name: List repo (debug)
+        run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          ls -la bot || true
+
       - name: Run scraper
-        run: python bot/main.py
+        run: |
+          python -u bot/main.py
+        # si tu veux limiter le timeout du job, décommente et ajuste:
+        # timeout-minutes: 10
+
+      - name: Upload logs on failure (optional)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs
+          path: |
+            ./logs || .  # adapte si ton script écrit des logs
