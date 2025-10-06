@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      SOURCE_URL: ${{ secrets.SOURCE_URL }}
       MIN_EXPONENTS: 80
     steps:
       - uses: actions/checkout@v4
