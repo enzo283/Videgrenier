@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 # Configuration
-INDEX_URL = "https://vide-greniers.org/evenements/"
+INDEX_URL = os.getenv("SOURCE_URL", "https://vide-greniers.org/evenements/")
 MIN_EXPOSANTS = int(os.getenv("MIN_EXPONENTS", "80"))
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "").strip()
 SEEN_FILE = "data/seen.json"
@@ -114,11 +114,8 @@ def find_department_urls(index_url):
     links = set()
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        # garde les liens contenant '/evenements/' et une partie après (ex: /evenements/Loire-Atlantique)
         if "/evenements/" in href:
             full = urljoin(index_url, href)
-            # évite les liens d'événements individuels (contiennent souvent '/evenement/' ou un slug plus long)
-            # on garde les slugs départementaux qui ressemblent à '/evenements/Name' (1 segment après)
             path = full.split("/evenements/")[-1].strip("/")
             if path and "/" not in path:
                 links.add(full)
@@ -135,7 +132,6 @@ def scrape_url(url):
         print("Non-200 status", r.status_code)
         return []
     soup = BeautifulSoup(r.text, "html.parser")
-    # candidates: cartes d'événements
     selectors = [".evenement", ".event", ".card", ".article-evenement", "li.event", "article", ".result-item"]
     candidates = []
     for sel in selectors:
@@ -194,11 +190,9 @@ def main():
     print(f"Found {len(dept_urls)} departments to scrape")
     all_events = []
     for url in dept_urls:
-        # déduit nom département depuis l'URL
         dept_name = url.rstrip("/").split("/")[-1].replace("-", " ")
         evs = scrape_url(url)
         if evs:
-            # ajoute champ dept pour groupement par département si besoin
             for e in evs:
                 e["department"] = dept_name
             all_events.extend(evs)
@@ -212,7 +206,6 @@ def main():
         print("No new events since last run.")
         return
 
-    # group by department then date for Discord fields
     by_dept = {}
     for e in new:
         dept = e.get("department", "Inconnu")
