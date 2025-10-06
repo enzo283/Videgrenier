@@ -1,37 +1,45 @@
-run-scraper:
-  runs-on: ubuntu-latest
-  env:
-    SOURCE_URL: ${{ secrets.SOURCE_URL }}
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+name: weekly-scrape
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests beautifulsoup4
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_URL: ${{ secrets.SOURCE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Debug: print env and list files
-      run: |
-        echo "=== ENV ==="
-        echo "SOURCE_URL='${SOURCE_URL}'"
-        echo "PWD: $(pwd)"
-        ls -la
-        ls -la bot || true
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Debug: curl index URL
-      run: |
-        echo "== curl --head =="
-        curl -I --fail --location --max-time 15 "${SOURCE_URL}" || echo "curl failed"
-        echo "== curl --show =="
-        curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,120p' || echo "curl show failed"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
 
-    - name: Run scraper (python -u)
-      run: |
-        echo "Running: python -u bot/main.py"
-        python -u bot/main.py
+      - name: Debug: print env and list files
+        run: |
+          echo "=== ENV ==="
+          echo "SOURCE_URL='${SOURCE_URL}'"
+          echo "PWD: $(pwd)"
+          ls -la
+          ls -la bot || true
+
+      - name: Debug: curl index URL
+        run: |
+          echo "== curl --head =="
+          curl -I --fail --location --max-time 15 "${SOURCE_URL}" || echo "curl failed"
+          echo "== curl --show =="
+          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,120p' || echo "curl show failed"
+
+      - name: Run scraper (python -u)
+        run: |
+          echo "Running: python -u bot/main.py"
+          python -u bot/main.py
