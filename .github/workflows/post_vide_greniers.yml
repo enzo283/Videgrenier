@@ -3,10 +3,7 @@ name: Post Vide-Greniers to Discord
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * FRI'   # vendredi 08:00 UTC, ajuste si besoin
-
-permissions:
-  contents: read
+    - cron: '0 8 * * FRI'
 
 jobs:
   post:
@@ -31,11 +28,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f bot/requirements.txt ]; then pip install -r bot/requirements.txt; fi
+          pip install -r requirements.txt
 
       - name: Run scraper/poster
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
+          MIN_EXPOSANTS: ${{ secrets.MIN_EXPOSANTS }}
         run: |
-          python bot/main.py
+          python -m bot.main
