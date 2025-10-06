@@ -1,9 +1,9 @@
-name: weekly-vitegrenier
+name: weekly-videgrenier
 
 on:
   schedule:
-    - cron: '0 7 * * FRI'    # chaque vendredi à 07:00 UTC
-  workflow_dispatch:         # permet lancement manuel depuis l'UI
+    - cron: '0 7 * * FRI'   # chaque vendredi à 07h00 UTC
+  workflow_dispatch:         # permet de le lancer manuellement depuis GitHub
 
 jobs:
   run:
@@ -26,4 +26,5 @@ jobs:
       - name: Run fetch script
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python fetch_vitegreniers.py
+        run: |
+          python fetch_videgreniers.py
