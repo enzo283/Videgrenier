@@ -1,7 +1,6 @@
-# ajoute/assure que DiscordNotifier comporte send_embed
-# (utilisé par main.py)
-# Si tu as déjà notifier.py modifié précédemment, garde tel quel ; sinon remplace par :
-import os, json, requests, logging
+import os
+import requests
+import logging
 
 DISCORD_MAX_EMBEDS = 10
 EMBED_DESC_MAX = 2048
@@ -17,13 +16,13 @@ class DiscordNotifier:
         if not self.webhook:
             logging.error("No webhook configured")
             return False
-        r = self.session.post(self.webhook, json=payload, timeout=15)
         try:
+            r = self.session.post(self.webhook, json=payload, timeout=15)
             r.raise_for_status()
             logging.info(f"Discord webhook posted (status {r.status_code})")
             return True
         except Exception:
-            logging.exception(f"Discord webhook failed: {getattr(r,'status_code','N/A')} - {getattr(r,'text','')[:400]}")
+            logging.exception("Discord webhook failed")
             return False
 
     def send_text(self, text):
@@ -33,7 +32,7 @@ class DiscordNotifier:
         embed = {"title": title[:EMBED_TITLE_MAX], "description": description[:EMBED_DESC_MAX], "color": color}
         if url:
             embed["url"] = url
-        return self.send({"embeds":[embed]})
+        return self.send({"embeds": [embed]})
 
     def send_file(self, path, name=None):
         if not self.webhook:
@@ -42,7 +41,7 @@ class DiscordNotifier:
         try:
             with open(path, "rb") as f:
                 files = {"file": (name, f)}
-                r = requests.post(self.webhook, files=files, timeout=30)
+                r = requests.post(self.webhook, files=files, timeout=60)
                 r.raise_for_status()
                 logging.info(f"Uploaded file {name} to Discord")
                 return True
