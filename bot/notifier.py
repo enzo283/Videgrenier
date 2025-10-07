@@ -1,7 +1,7 @@
-import os
-import json
-import requests
-import logging
+# ajoute/assure que DiscordNotifier comporte send_embed
+# (utilisé par main.py)
+# Si tu as déjà notifier.py modifié précédemment, garde tel quel ; sinon remplace par :
+import os, json, requests, logging
 
 DISCORD_MAX_EMBEDS = 10
 EMBED_DESC_MAX = 2048
@@ -23,21 +23,17 @@ class DiscordNotifier:
             logging.info(f"Discord webhook posted (status {r.status_code})")
             return True
         except Exception:
-            logging.exception(f"Discord webhook failed: {getattr(r,'status_code', 'N/A')} - {getattr(r,'text','')[:400]}")
+            logging.exception(f"Discord webhook failed: {getattr(r,'status_code','N/A')} - {getattr(r,'text','')[:400]}")
             return False
 
     def send_text(self, text):
-        if not self.webhook:
-            logging.error("No webhook configured")
-            return False
-        payload = {"content": text}
-        return self.send(payload)
+        return self.send({"content": text})
 
     def send_embed(self, title, description, url=None, color=5814783):
         embed = {"title": title[:EMBED_TITLE_MAX], "description": description[:EMBED_DESC_MAX], "color": color}
         if url:
             embed["url"] = url
-        return self.send({"embeds": [embed]})
+        return self.send({"embeds":[embed]})
 
     def send_file(self, path, name=None):
         if not self.webhook:
