@@ -1,21 +1,18 @@
-Usage and notes for the scraper + notifier.
+README: Scraper orienté "liste par département"
 
-Secrets required:
-- SOURCE_URL: site root or listing page (example: https://www.lesvidegreniers.fr)
-- DISCORD_WEBHOOK: full Discord webhook URL
+Secrets:
+- SOURCE_URL: https://www.lesvidegreniers.fr
+- DISCORD_WEBHOOK: https://discord.com/api/webhooks/...
 
-What the pipeline does:
-- Runs weekly (cron) or on manual dispatch.
-- Downloads SOURCE_URL HTML, runs a site-specific scraper if available,
-  otherwise falls back to a generic scraper.
-- Extracts title, link, date, place, excerpt.
-- Normalizes/deduplicates results.
-- Sends results to DISCORD_WEBHOOK as embeds (batched).
-- If embeds fail or are too large, the workflow uploads a JSON file artifact with full results.
+Comportement:
+- Scrape la page SOURCE_URL (site-specific scraper pour lesvidegreniers.fr).
+- Normalise URLs, splitte blocs multiples, suit pages détail (detail_vg.php) pour enrichir.
+- Filtre menus/départements et garde les annonces.
+- Regroupe PAR DÉPARTEMENT (ordre alphabétique) et trie par date.
+- Envoie sur Discord: message d'en-tête puis un message par département (embed si court, fichier si trop long).
+- Logs: /tmp/scrape-debug/full-run.json et /tmp/scrape-debug/summary_by_department.txt
 
-Debugging:
-- After run, download the artifact "scrape-debug" which contains a small curl output and the script stdout.
-- The script also writes /tmp/scrape-debug/full-run.json with the structured items.
-
-Extending:
-- To support another site, add a new Scraper class in `bot/scraper.py` and update `select_scraper`.
+Conseils:
+- Si tu veux filtrer uniquement certains départements, je peux ajouter un whitelist (liste de codes ou noms).
+- Si tu veux augmenter le nombre de pages détail suivies, modifie MAX_FOLLOW dans `scraper.normalize_items`.
+- Après run, télécharge l'artifact "scrape-debug" et colle le JSON si quelque chose cloche.
