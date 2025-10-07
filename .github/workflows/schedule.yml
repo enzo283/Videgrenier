@@ -29,26 +29,29 @@ jobs:
       - name: Run scraper (creates logs and artifacts)
         run: |
           mkdir -p /tmp/scrape-debug
-          LOG=/tmp/scrape-debug/scrape-debug.txt
-          echo "=== START $(date -u) ===" >"$LOG"
-          echo "ENV: SOURCE_URL='${SOURCE_URL}'" >>"$LOG"
-          echo "ENV: DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG"
-          echo "" >>"$LOG"
-          echo "=== CURL HEAD ===" >>"$LOG"
-          curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG" 2>&1 || echo "curl HEAD failed" >>"$LOG"
-          echo "" >>"$LOG"
-          echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG"
-          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG" 2>&1 || echo "curl show failed" >>"$LOG"
-          echo "" >>"$LOG"
-          echo "=== RUN python bot/main.py ===" >>"$LOG"
-          python -u bot/main.py >>"$LOG" 2>&1 || echo "python script exited with non-zero" >>"$LOG"
-          echo "" >>"$LOG"
-          echo "=== END $(date -u) ===" >>"$LOG"
-          echo "WROTE LOG TO $LOG"
+          LOG_TXT=/tmp/scrape-debug/scrape-debug.txt
+          LOG_JSON=/tmp/scrape-debug/full-run.json
+          echo "=== START $(date -u) ===" >"$LOG_TXT"
+          echo "ENV: SOURCE_URL='${SOURCE_URL}'" >>"$LOG_TXT"
+          echo "ENV: DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG_TXT"
+          echo "" >>"$LOG_TXT"
+          echo "=== CURL HEAD ===" >>"$LOG_TXT"
+          curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG_TXT" 2>&1 || echo "curl HEAD failed" >>"$LOG_TXT"
+          echo "" >>"$LOG_TXT"
+          echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG_TXT"
+          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG_TXT" 2>&1 || echo "curl show failed" >>"$LOG_TXT"
+          echo "" >>"$LOG_TXT"
+          echo "=== RUN python bot/main.py ===" >>"$LOG_TXT"
+          python -u bot/main.py >>"$LOG_TXT" 2>&1 || echo "python script exited with non-zero" >>"$LOG_TXT"
+          echo "" >>"$LOG_TXT"
+          echo "=== COPY JSON LOG IF EXISTS ===" >>"$LOG_TXT"
+          if [ -f /tmp/scrape-debug/full-run.json ]; then cp /tmp/scrape-debug/full-run.json "$LOG_JSON"; echo "copied json log" >>"$LOG_TXT"; fi
+          echo "=== END $(date -u) ===" >>"$LOG_TXT"
+          echo "WROTE LOGS TO $LOG_TXT and $LOG_JSON"
         shell: bash
 
-      - name: Upload debug log artifact
+      - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         with:
           name: scrape-debug
-          path: /tmp/scrape-debug/scrape-debug.txt
+          path: /tmp/scrape-debug
