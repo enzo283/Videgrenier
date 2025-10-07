@@ -19,7 +19,7 @@ class DiscordNotifier:
         try:
             r = self.session.post(self.webhook, json=payload, timeout=15)
             r.raise_for_status()
-            logging.info(f"Discord webhook posted (status {r.status_code})")
+            logging.info("Discord webhook posted (status %s)", r.status_code)
             return True
         except Exception:
             logging.exception("Discord webhook failed")
@@ -36,6 +36,7 @@ class DiscordNotifier:
 
     def send_file(self, path, name=None):
         if not self.webhook:
+            logging.error("No webhook configured for file upload")
             return False
         name = name or os.path.basename(path)
         try:
@@ -43,7 +44,7 @@ class DiscordNotifier:
                 files = {"file": (name, f)}
                 r = requests.post(self.webhook, files=files, timeout=60)
                 r.raise_for_status()
-                logging.info(f"Uploaded file {name} to Discord")
+                logging.info("Uploaded file %s to Discord", name)
                 return True
         except Exception:
             logging.exception("Failed to upload file to Discord")
