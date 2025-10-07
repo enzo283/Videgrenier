@@ -23,8 +23,12 @@ def _get(url, timeout=15):
 def parse_date(text):
     if not text:
         return None
-    dt = dateparser.parse(text, languages=['fr'], settings={'PREFER_DAY_OF_MONTH': 'first'})
-    return dt.isoformat() if dt else None
+    try:
+        dt = dateparser.parse(text, languages=['fr'], settings={'PREFER_DAY_OF_MONTH': 'first'})
+        return dt.isoformat() if dt else None
+    except Exception:
+        logging.exception("parse_date failed")
+        return None
 
 def normalize_text(s):
     if not s:
@@ -32,71 +36,85 @@ def normalize_text(s):
     return re.sub(r'\s+', ' ', s).strip()
 
 def split_block_annonces(text):
-    # split occurrences like "Ville : <X> Date : <Y> Adresse : <Z> ➔" or "Ville : ... Date : ..."
-    parts = []
+    """
+    Split a large block that may contain several announcements.
+    Uses arrow '➔' as first separator, otherwise splits on repeated 'Ville :' occurrences.
+    """
     if not text:
-        return parts
-    # use the arrow symbol or repeated "Ville :" as separator
-    if "➔" in text:
-        for part in text.split("➔"):
-            p = part.strip()
-            if p:
-                parts.append(p)
-    else:
-        # try to split by "Ville :" occurrences
-        matches = re.split(r'(?=(Ville\s*:))', text, flags=re.I)
-        if len(matches) > 1:
-            accum = ""
-            for m in matches:
-                if not m:
-                    continue
-                if m.lower().startswith("ville"):
-                    if accum:
-                        parts.append(accum.strip())
-                    accum = m
-                else:
-                    accum += m
-            if accum:
-                parts.append(accum.strip())
+        return []
+    parts = []
+    try:
+        if "➔" in text:
+            for p in text.split("➔"):
+                p = p.strip()
+                if p:
+                    parts.append(p)
         else:
-            parts = [text]
+            # split while keeping 'Ville :' markers at start of each chunk
+            tokens = re.split(r'(?=(?:Ville\s*:))', text, flags=re.I)
+            if len(tokens) > 1:
+                for t in tokens:
+                    t = t.strip()
+                    if t:
+                        parts.append(t)
+            else:
+                parts = [text.strip()]
+    except Exception:
+        logging.exception("split_block_annonces failed")
+        parts = [text]
     return parts or [text]
 
 def extract_fields_from_snippet(snip):
+    """
+    Given a snippet like "Brocante ... Ville : X Date : Y Adresse : Z", extract structured fields.
+    """
     title = ""
     ville = ""
     date = None
     adresse = ""
-    # ville
-    m_ville = re.search(r'Ville\s*:\s*([^DateAdresse➔\n\r]+)', snip, re.I)
-    if m_ville:
-        ville = m_ville.group(1).strip(" ,;")
-    # date
-    m_date = re.search(r'Date\s*:\s*([^Adresse➔\n\r]+)', snip, re.I)
-    if m_date:
-        date = parse_date(m_date.group(1).strip())
-    # adresse
-    m_ad = re.search(r'Adresse\s*:\s*([^➔\n\r]+)', snip, re.I)
-    if m_ad:
-        adresse = m_ad.group(1).strip(" ,;")
-    # title: take text before Ville: or Date:
-    t = re.split(r'(?:Ville\s*:|Date\s*:)', snip, flags=re.I)[0]
-    title = normalize_text(t)[:200]
+    try:
+        # Ville
+        m_ville = re.search(r'Ville\s*:\s*([^DateAdresse➔\n\r]+)', snip, re.I)
+        if m_ville:
+            ville = m_ville.group(1).strip(" ,;")
+        # Date
+        m_date = re.search(r'Date\s*:\s*([^Adresse➔\n\r]+)', snip, re.I)
+        if m_date:
+            date = parse_date(m_date.group(1).strip())
+        # Adresse
+        m_ad = re.search(r'Adresse\s*:\s*([^➔\n\r]+)', snip, re.I)
+        if m_ad:
+            adresse = m_ad.group(1).strip(" ,;")
+        # Title = text before Ville: or Date:
+        t = re.split(r'(?:Ville\s*:|Date\s*:)', snip, flags=re.I)[0]
+        title = normalize_text(t)[:250]
+    except Exception:
+        logging.exception("extract_fields_from_snippet failed")
     return {"title": title, "ville": ville, "date": date, "adresse": adresse, "excerpt": normalize_text(snip)}
 
 def normalize_items(items):
+    """
+    items: list of dicts from scrapers (may contain title,url,excerpt,raw,base,region,department,date,...)
+    Returns enriched list with absolute URLs, split announcements, dedup, and follow detail pages up to MAX_FOLLOW.
+    """
     out = []
     seen = set()
+
+    # First pass: split and normalize
     for it in items:
         raw = it.get("raw") or it.get("excerpt") or ""
         title = normalize_text(it.get("title") or "")
         url = it.get("url") or ""
         base = it.get("base") or ""
+        # make absolute
         if url and not url.startswith("http"):
-            url = urljoin(base or "https://www.lesvidegreniers.fr", url)
+            try:
+                url = urljoin(base or "https://www.lesvidegreniers.fr", url)
+            except Exception:
+                url = url
         region = it.get("region") or ""
         department = it.get("department") or it.get("dept") or it.get("department_name") or ""
-        # split multiple annonces in raw
+
         snippets = split_block_annonces(raw)
         for sn in snippets:
             fields = extract_fields_from_snippet(sn)
@@ -104,7 +122,7 @@ def normalize_items(items):
             final_date = it.get("date") or fields.get("date") or parse_date(sn)
             final_ville = it.get("ville") or fields.get("ville") or ""
             final_adresse = it.get("place") or fields.get("adresse") or ""
-            key = (final_title[:150], url, final_ville, final_date or "")
+            key = (final_title[:180], url or "", final_ville or "", final_date or "")
             if key in seen:
                 continue
             seen.add(key)
@@ -118,13 +136,16 @@ def normalize_items(items):
                 "region": region,
                 "department": department
             })
-    # enrich following detail pages (detail_vg.php) up to a cap
+
+    # Second pass: follow detail pages for enrichment (cap to avoid long runs)
     enriched = []
-    MAX_FOLLOW = 80
+    MAX_FOLLOW = 100
     followed = 0
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
+
     for it in out:
+        # follow only detail pages that look like site detail
         if it.get("url") and "detail_vg.php" in it.get("url") and followed < MAX_FOLLOW:
             try:
                 followed += 1
@@ -132,62 +153,72 @@ def normalize_items(items):
                 r.raise_for_status()
                 html = r.text
                 soup = BeautifulSoup(html, "html.parser")
-                # title
+                # Title override
                 tsel = soup.select_one("h1, h2")
                 if tsel:
                     it["title"] = normalize_text(tsel.get_text(" ", strip=True))
-                # attempt to find structured fields on detail
+                # page text for regex extraction
                 page_text = soup.get_text(" ", strip=True)
-                md = re.search(r'(?:Date\s*:?\s*)([^\n\r]{4,80})', page_text, re.I)
+                # Date
+                md = re.search(r'(?:Date\s*:?\s*)([^\n\r]{4,120})', page_text, re.I)
                 if md:
                     pd = parse_date(md.group(1))
                     if pd:
                         it["date"] = pd
-                mv = re.search(r'(?:Ville\s*:?\s*)([A-Za-zÀ-ÿ\-\s]{1,80})', page_text)
+                # Ville
+                mv = re.search(r'(?:Ville\s*:?\s*)([A-Za-zÀ-ÿ\-\s]{1,120})', page_text)
                 if mv:
                     it["ville"] = normalize_text(mv.group(1))
-                ma = re.search(r'(?:Adresse\s*:?\s*)(.{5,150})', page_text)
+                # Adresse
+                ma = re.search(r'(?:Adresse\s*:?\s*)(.{5,200})', page_text)
                 if ma:
                     it["adresse"] = normalize_text(ma.group(1))
-                # attempt to get department/region from breadcrumbs or meta
-                crumb = soup.select_one(".breadcrumb, .breadcrumbs, nav[aria-label]")
+                # Department / region from breadcrumbs or meta
+                crumb = soup.select_one(".breadcrumb, .breadcrumbs, nav[aria-label], .fil-ariane")
                 if crumb:
                     crumb_text = crumb.get_text(" ", strip=True)
-                    # try extract department like "Ain (01)" or simple department names
+                    # try find patterns like "Ain (01)" or single department word
                     mdept = re.search(r'([A-Za-zÀ-ÿ\-\s]+(?:§@customBackSlashd{1,3}!§)?)', crumb_text)
                     if mdept:
                         it["department"] = normalize_text(mdept.group(1))
                 # description
                 sel_desc = soup.select_one(".description, .content, .texte, .desc, #content")
                 if sel_desc:
-                    it["excerpt"] = normalize_text(sel_desc.get_text(" ", strip=True))[:2000]
+                    it["excerpt"] = normalize_text(sel_desc.get_text(" ", strip=True))[:3000]
                 else:
-                    it["excerpt"] = page_text[:1000]
-                time.sleep(0.12)
+                    it["excerpt"] = page_text[:2000]
+                # polite pause
+                time.sleep(0.08)
             except Exception:
-                logging.exception("detail fetch failed")
+                logging.exception("Failed to fetch/enrich detail page: %s", it.get("url"))
         enriched.append(it)
+
     return enriched
 
 class GenericScraper:
     def scrape(self, url):
-        logging.info(f"GenericScraper scraping {url}")
+        logging.info("GenericScraper scraping %s", url)
         html = _get(url)
-        base = re.match(r'^(https?://[^/]+)', url).group(1) if re.match(r'^(https?://[^/]+)', url) else url
+        base = re.match(r'^(https?://[^/]+)', url)
+        base = base.group(1) if base else url
         soup = BeautifulSoup(html, "html.parser")
         candidates = []
         for a in soup.find_all("a", href=True):
-            txt = a.get_text(" ", strip=True)
-            href = a['href']
-            if len(txt) < 20:
-                continue
-            if any(x in href for x in ("departement.php", "departements.php", "/region", "categorie", "category", "/tags/")):
-                continue
-            low = txt.lower()
-            if any(k in low for k in ("vide","brocante","grenier","bourse","marché","foire")) or re.search(r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b', txt):
-                candidates.append({"title": txt, "url": urljoin(base, href), "excerpt": a.find_parent().get_text(" ", strip=True) if a.find_parent() else txt, "base": base})
-            if len(candidates) >= 300:
-                break
+            try:
+                txt = a.get_text(" ", strip=True)
+                href = a['href']
+                if not txt or len(txt) < 20:
+                    continue
+                if any(x in href for x in ("departement.php", "departements.php", "/region", "categorie", "category", "/tags/")):
+                    continue
+                low = txt.lower()
+                if any(k in low for k in ("vide","brocante","grenier","bourse","marché","foire")) or re.search(r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b', txt):
+                    candidates.append({"title": txt, "url": urljoin(base, href), "excerpt": a.find_parent().get_text(" ", strip=True) if a.find_parent() else txt, "base": base})
+                if len(candidates) >= 400:
+                    break
+            except Exception:
+                logging.exception("Error processing link")
+        # fallback: block scanning
         if not candidates:
             selectors = ["article", "li", ".event", ".annonce", ".result", ".item", ".listing"]
             for sel in selectors:
@@ -198,7 +229,7 @@ class GenericScraper:
                     a = el.find("a", href=True)
                     href = a['href'] if a else ""
                     candidates.append({"title": a.get_text(strip=True) if a else text[:120], "url": urljoin(base, href) if href else "", "excerpt": text, "base": base})
-                    if len(candidates) >= 300:
+                    if len(candidates) >= 400:
                         break
                 if candidates:
                     break
@@ -206,50 +237,71 @@ class GenericScraper:
 
 class LesVideGreniersScraper:
     def scrape(self, url):
-        logging.info(f"LesVideGreniersScraper scraping {url}")
+        logging.info("LesVideGreniersScraper scraping %s", url)
         html = _get(url)
-        base = re.match(r'^(https?://[^/]+)', url).group(1) if re.match(r'^(https?://[^/]+)', url) else url
+        base = re.match(r'^(https?://[^/]+)', url)
+        base = base.group(1) if base else url
         soup = BeautifulSoup(html, "html.parser")
         candidates = []
-        # focus on listing blocks and detail links
-        main = soup.select_one("#content, .content, .main, .container") or soup
+
+        # Prefer content area(s)
+        main_selectors = ["#content", ".content", ".main", ".container", "main"]
+        mains = []
+        for sel in main_selectors:
+            sel_el = soup.select_one(sel)
+            if sel_el:
+                mains.append(sel_el)
+        if not mains:
+            mains = [soup]
+
         seen = set()
-        # prefer links to detail_vg.php
-        for a in main.find_all("a", href=True):
-            href = a['href']
-            full = urljoin(base, href)
-            if full in seen:
-                continue
-            seen.add(full)
-            txt = a.get_text(" ", strip=True) or a.find_parent().get_text(" ", strip=True)
-            # skip nav/department list
-            if any(x in href for x in ("departement.php", "departements.php", "/region", "categorie", "category", "/tags/")):
-                continue
-            if txt.lower().strip() in ("lire la suite", "en savoir plus", "voir plus"):
-                continue
-            if len(txt) < 20:
-                continue
-            parent = a.find_parent()
-            excerpt = parent.get_text(" ", strip=True) if parent else txt
-            # heuristics: prefer detail_vg or blocks containing Ville/Date/Adresse
-            low = excerpt.lower()
-            if "detail_vg.php" in href or "ville" in low or "date" in low or re.search(r'\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}', excerpt) or any(k in low for k in ("vide","brocante","grenier","bourse","marché","foire")):
-                candidates.append({"title": txt, "url": full, "excerpt": excerpt, "base": base})
-            if len(candidates) >= 600:
+        # Prefer links that look like detail pages or contain Ville/Date clues
+        for main in mains:
+            for a in main.find_all("a", href=True):
+                try:
+                    href = a['href']
+                    full = urljoin(base, href)
+                    if full in seen:
+                        continue
+                    seen.add(full)
+                    txt = a.get_text(" ", strip=True) or (a.find_parent().get_text(" ", strip=True) if a.find_parent() else "")
+                    if not txt or len(txt) < 20:
+                        continue
+                    # Skip navigation / department lists / menu items
+                    if any(x in href for x in ("departement.php", "departements.php", "/region", "categorie", "category", "/tags/")):
+                        continue
+                    if txt.lower().strip() in ("lire la suite", "en savoir plus", "voir plus"):
+                        continue
+                    parent = a.find_parent()
+                    excerpt = parent.get_text(" ", strip=True) if parent else txt
+                    low = excerpt.lower()
+                    if "detail_vg.php" in href or "ville" in low or "date" in low or re.search(r'\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}', excerpt) or any(k in low for k in ("vide","brocante","grenier","bourse","marché","foire")):
+                        candidates.append({"title": txt, "url": full, "excerpt": excerpt, "base": base})
+                    # safety cap
+                    if len(candidates) >= 800:
+                        break
+                except Exception:
+                    logging.exception("Error processing main links")
+            if candidates:
                 break
-        # fallback: if none, look for blocks with several annonces and include them
+
+        # Fallback: scan for blocks likely containing multiple items
         if not candidates:
             for sel in ["article", "li", ".card", ".listing", ".result"]:
                 for el in soup.select(sel):
-                    text = el.get_text(" ", strip=True)
-                    if len(text) < 60:
-                        continue
-                    a = el.find("a", href=True)
-                    href = a['href'] if a else ""
-                    full = urljoin(base, href) if href else ""
-                    candidates.append({"title": a.get_text(strip=True) if a else text[:120], "url": full, "excerpt": text, "base": base})
-                    if len(candidates) >= 400:
-                        break
+                    try:
+                        text = el.get_text(" ", strip=True)
+                        if len(text) < 60:
+                            continue
+                        a = el.find("a", href=True)
+                        href = a['href'] if a else ""
+                        full = urljoin(base, href) if href else ""
+                        candidates.append({"title": a.get_text(strip=True) if a else text[:120], "url": full, "excerpt": text, "base": base})
+                        if len(candidates) >= 600:
+                            break
+                    except Exception:
+                        logging.exception("Fallback block error")
                 if candidates:
                     break
+
         return candidates
