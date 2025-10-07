@@ -3,14 +3,16 @@ import os
 import sys
 import json
 import logging
+import zipfile
 from datetime import datetime, timezone
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from scraper import select_scraper, normalize_items
 from notifier import DiscordNotifier
 
 LOG_DIR = "/tmp/scrape-debug"
 LOG_JSON = f"{LOG_DIR}/full-run.json"
 SUMMARY = f"{LOG_DIR}/summary_departments.txt"
+ZIP_PATH = f"{LOG_DIR}/departments_files.zip"
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -57,6 +59,7 @@ def md_for_department(dept_name, region, items):
             time_ = safe(it.get("time"))
             ville = safe(it.get("ville"))
             adresse = safe(it.get("adresse"))
+            lieu = safe(it.get("lieu_precis"))
             exposants = safe(str(it.get("nb_exposants") or ""))
             url = safe(it.get("url"))
             desc = safe(it.get("excerpt"))
@@ -66,6 +69,8 @@ def md_for_department(dept_name, region, items):
                 lines.append(f"- Heures : **{time_}**")
             if ville:
                 lines.append(f"- Ville : **{ville}**")
+            if lieu:
+                lines.append(f"- Lieu précis : {lieu}")
             if adresse:
                 lines.append(f"- Adresse : {adresse}")
             if exposants:
@@ -73,11 +78,20 @@ def md_for_department(dept_name, region, items):
             if url:
                 lines.append(f"- Lien : {url}")
             if desc:
-                # indent description block for readability
                 lines.append(f"- Description :\n\n    {desc.replace('\\n','\\n    ')}")
             lines.append("")  # gap
         lines.append("")  # gap between day sections
     return "\n".join(lines)
+
+def zip_all_files(files, zip_path):
+    try:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            for file_path in files:
+                z.write(file_path, arcname=os.path.basename(file_path))
+        return zip_path
+    except Exception:
+        logging.exception("Failed to create zip")
+        return None
 
 def main():
     setup_logging()
@@ -89,7 +103,7 @@ def main():
     if not webhook:
         logging.warning("DISCORD_WEBHOOK not set — will only write files locally")
 
-    logging.info(f"Scraping {src}")
+    logging.info("Starting scrape for %s", src)
     scraper = select_scraper(src)
     try:
         raw = scraper.scrape(src)
@@ -97,10 +111,11 @@ def main():
         logging.exception("Scraper failed")
         raw = []
 
-    logging.info(f"Raw items: {len(raw)}")
+    logging.info("Raw items: %s", len(raw))
     items = normalize_items(raw)
-    logging.info(f"Normalized items: {len(items)}")
+    logging.info("Normalized items: %s", len(items))
 
+    # group by department strictly
     by_dept = defaultdict(lambda: {"region": "Autres", "items": []})
     for it in items:
         dept = safe(it.get("department")).strip() or "Inconnu"
@@ -121,22 +136,29 @@ def main():
         path = os.path.join(LOG_DIR, filename)
         with open(path, "w", encoding="utf-8") as f:
             f.write(md if md.strip() else f"# {dept} — {region}\n\n(Aucune annonce)")
-        dept_files.append((dept, region, path, os.path.getsize(path)))
+        dept_files.append(path)
 
-    with open(SUMMARY, "w", encoding="utf-8") as f:
-        for dept, region, path, size in dept_files:
-            f.write(f"{dept} | {region} | {os.path.basename(path)} | {size} bytes\n")
+    # write summary
+    with open(SUMMARY, "w", encoding="utf-8") as s:
+        for p in dept_files:
+            s.write(f"{os.path.basename(p)} | {os.path.getsize(p)} bytes\n")
 
     notifier = DiscordNotifier(webhook) if webhook else None
 
     if notifier:
         try:
-            notifier.send_text(f"📁 Scraper: {len(items)} annonces — envoi {len(dept_files)} fichiers (un par département).")
-            # send files only (one by department)
-            for dept, region, path, size in dept_files:
-                notifier.send_file(path, os.path.basename(path))
+            # send short header
+            notifier.send_text(f"📁 Scraper: {len(items)} annonces — {len(dept_files)} fichiers par département (zip joint).")
+            # create a zip with all department files to avoid many uploads
+            zip_path = zip_all_files(dept_files, ZIP_PATH)
+            if zip_path and os.path.exists(zip_path):
+                notifier.send_file(zip_path, os.path.basename(zip_path))
+            else:
+                # fallback: send each file (with retries handled in notifier)
+                for p in dept_files:
+                    notifier.send_file(p, os.path.basename(p))
         except Exception:
-            logging.exception("Failed to send files")
+            logging.exception("Failed to send files to Discord")
             try:
                 notifier.send_file(LOG_DIR + "/full-run.json", "full-run.json")
             except Exception:
