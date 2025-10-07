@@ -44,10 +44,14 @@ jobs:
           echo "=== RUN python bot/main.py ===" >>"$LOG_TXT"
           python -u bot/main.py >>"$LOG_TXT" 2>&1 || echo "python script exited with non-zero" >>"$LOG_TXT"
           echo "" >>"$LOG_TXT"
-          echo "=== COPY JSON LOG IF EXISTS ===" >>"$LOG_TXT"
-          if [ -f /tmp/scrape-debug/full-run.json ]; then cp /tmp/scrape-debug/full-run.json "$LOG_JSON"; echo "copied json log" >>"$LOG_TXT"; fi
+          # Only copy the JSON log if it exists and is different from target (prevent same-file cp)
+          if [ -f /tmp/scrape-debug/full-run.json ]; then
+            echo "full-run.json exists" >>"$LOG_TXT"
+          else
+            echo "no full-run.json produced" >>"$LOG_TXT"
+          fi
           echo "=== END $(date -u) ===" >>"$LOG_TXT"
-          echo "WROTE LOGS TO $LOG_TXT and $LOG_JSON"
+          echo "WROTE LOGS TO $LOG_TXT"
         shell: bash
 
       - name: Upload debug artifacts
