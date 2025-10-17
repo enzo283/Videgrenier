@@ -1,61 +1,28 @@
-name: weekly-scrape
+name: Weekly Vide-Greniers Bot
 
 on:
   schedule:
-    - cron: '0 6 * * 1'
-  workflow_dispatch:
+    - cron: '0 9 * * 5'  # Tous les vendredis à 9h
+  workflow_dispatch:  # permet de le lancer manuellement aussi
 
 jobs:
-  scrape-and-notify:
+  run-bot:
     runs-on: ubuntu-latest
-    env:
-      SOURCE_URL: ${{ secrets.SOURCE_URL }}
-      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-      PYTHONUNBUFFERED: '1'
+
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        run: pip install -r bot/requirements.txt
 
-      - name: Run scraper (creates logs and artifacts)
-        run: |
-          mkdir -p /tmp/scrape-debug
-          LOG_TXT=/tmp/scrape-debug/scrape-debug.txt
-          LOG_JSON=/tmp/scrape-debug/full-run.json
-          echo "=== START $(date -u) ===" >"$LOG_TXT"
-          echo "ENV: SOURCE_URL='${SOURCE_URL}'" >>"$LOG_TXT"
-          echo "ENV: DISCORD_WEBHOOK_SET='${DISCORD_WEBHOOK:+yes}'" >>"$LOG_TXT"
-          echo "" >>"$LOG_TXT"
-          echo "=== CURL HEAD ===" >>"$LOG_TXT"
-          curl -I --fail --location --max-time 15 "${SOURCE_URL}" >>"$LOG_TXT" 2>&1 || echo "curl HEAD failed" >>"$LOG_TXT"
-          echo "" >>"$LOG_TXT"
-          echo "=== CURL FIRST LINES (HTML) ===" >>"$LOG_TXT"
-          curl --fail --location --max-time 15 "${SOURCE_URL}" -s | sed -n '1,200p' >>"$LOG_TXT" 2>&1 || echo "curl show failed" >>"$LOG_TXT"
-          echo "" >>"$LOG_TXT"
-          echo "=== RUN python bot/main.py ===" >>"$LOG_TXT"
-          python -u bot/main.py >>"$LOG_TXT" 2>&1 || echo "python script exited with non-zero" >>"$LOG_TXT"
-          echo "" >>"$LOG_TXT"
-          # Only copy the JSON log if it exists and is different from target (prevent same-file cp)
-          if [ -f /tmp/scrape-debug/full-run.json ]; then
-            echo "full-run.json exists" >>"$LOG_TXT"
-          else
-            echo "no full-run.json produced" >>"$LOG_TXT"
-          fi
-          echo "=== END $(date -u) ===" >>"$LOG_TXT"
-          echo "WROTE LOGS TO $LOG_TXT"
-        shell: bash
-
-      - name: Upload debug artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: scrape-debug
-          path: /tmp/scrape-debug
+      - name: Run bot
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          SOURCE_URL: ${{ secrets.SOURCE_URL }}
+        run: python -m bot.main
