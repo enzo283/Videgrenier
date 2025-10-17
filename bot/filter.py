@@ -1,15 +1,14 @@
-# bot/filter.py
-def keep_big_events(events, min_exposants=80):
-    filtered = [e for e in events if (e.get("exposants") or 0) >= min_exposants]
-    return filtered
+from datetime import datetime
+from bot.utils import is_event_this_weekend
 
-def deduplicate(events, key_fields=("link", "title")):
-    seen = set()
-    out = []
+def filter_events(events):
+    """Filtre les événements du bon week-end avec +80 exposants"""
+    valid_events = []
     for e in events:
-        key = tuple(e.get(f) for f in key_fields)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(e)
-    return out
+        try:
+            event_date = datetime.strptime(e["date"], "%Y-%m-%d").date()
+            if e["exhibitors_count"] >= 80 and is_event_this_weekend(event_date):
+                valid_events.append(e)
+        except Exception as err:
+            print(f"Erreur filtrage : {err}")
+    return valid_events
