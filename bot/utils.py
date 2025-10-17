@@ -1,29 +1,26 @@
 # bot/utils.py
-import re
-from urllib.parse import urljoin
-import os
+from datetime import date, timedelta, datetime
 
-def text_or_none(el):
-    if not el:
-        return None
-    return el.get_text(strip=True)
+def this_week_sat_sun(ref_date=None):
+    """Return dates (YYYY-MM-DD) for the Saturday and Sunday of the current week
+    relative to ref_date. Week considered: Monday..Sunday. If today is Friday,
+    return upcoming Saturday and Sunday."""
+    if ref_date is None:
+        ref_date = date.today()
+    # find Monday of current week
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    saturday = monday + timedelta(days=5)
+    sunday = monday + timedelta(days=6)
+    return saturday, sunday
 
-def extract_int(s):
-    if s is None:
-        return 0
-    digits = "".join(ch for ch in str(s) if ch.isdigit())
-    try:
-        return int(digits) if digits else 0
-    except:
-        return 0
+def iso_date(d: date) -> str:
+    return d.isoformat()
 
-def join_url(href):
-    # Utilise une base si besoin (lire SOURCE_URL environ si présent)
-    base = os.getenv("SOURCE_URL_BASE") or os.getenv("SOURCE_URL") or ""
-    try:
-        return urljoin(base, href)
-    except:
-        return href
+def ensure_region_dir(base='results', region_slug='unknown'):
+    import os
+    path = os.path.join(base, region_slug)
+    os.makedirs(path, exist_ok=True)
+    return path
 
-def safe_get(d, key, default=None):
-    return d.get(key, default) if isinstance(d, dict) else default
+def region_slug(name: str) -> str:
+    return name.lower().replace(' ', '-').replace("'", "-")
