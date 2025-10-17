@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "title": "Grande Brocante de Lyon",
+      "region": "Auvergne-Rhône-Alpes",
+      "department": "Rhône (69)",
+      "date": "2025-10-18",
+      "day": "saturday",
+      "exhibitors_count": 150,
+      "opening_time": "08:00",
+      "exhibitors_arrival_time": "06:00",
+      "address": "Place Bellecour, 69002 Lyon",
+      "source_url": "https://exemple.fr/lyon-brocante"
+    },
+    {
+      "title": "Vide-Grenier de Toulouse",
+      "region": "Occitanie",
+      "department": "Haute-Garonne (31)",
+      "date": "2025-10-19",
+      "day": "sunday",
+      "exhibitors_count": 120,
+      "opening_time": "09:00",
+      "exhibitors_arrival_time": "07:00",
+      "address": "Allées Jules Guesde, 31000 Toulouse",
+      "source_url": "https://exemple.fr/toulouse-videgrenier"
+    },
+    {
+      "title": "Petit Marché de Tours",
+      "region": "Centre-Val de Loire",
+      "department": "Indre-et-Loire (37)",
+      "date": "2025-10-18",
+      "day": "saturday",
+      "exhibitors_count": 40,
+      "opening_time": "09:30",
+      "exhibitors_arrival_time": "08:00",
+      "address": "Place Plumereau, 37000 Tours",
+      "source_url": "https://exemple.fr/tours-marche"
+    }
+  ]
+}
